@@ -1,15 +1,18 @@
 /*  M5Stack Nightscout monitor
     Copyright (C) 2018, 2019 Martin Lukasek <martin@lukasek.cz>
-    CUSTOMIZED VERSION WITH BIGGER TIME AGO, DELTA, CLOCK. NO STARTUP MUSIC. NO BACKGROUND NOISE. SMALLER ARROW. SNOOZE BAR DIFFERENT LOCATION. 
+
+    PIET MONDRIAN CUSTOMIZATION 2.0
     
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
     the Free Software Foundation, either version 3 of the License, or
     (at your option) any later version.
+
     This program is distributed in the hope that it will be useful,
     but WITHOUT ANY WARRANTY; without even the implied warranty of
     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
     GNU General Public License for more details.
+
     You should have received a copy of the GNU General Public License
     along with this program.  If not, see <https://www.gnu.org/licenses/>. 
     
@@ -17,649 +20,282 @@
     IniFile by Steve Marple <stevemarple@googlemail.com> (GNU LGPL v2.1)
     ArduinoJson by Benoit BLANCHON (MIT License) 
     IoT Icon Set by Artur Funk (GPL v3)
-
-    PIET MONDRAIN ARTWORK CUSTOMIZATION
-
 */
-
 
 #include <M5Stack.h>
 #include <WiFi.h>
 #include <WiFiMulti.h>
 #include <HTTPClient.h>
 #include "time.h"
+// #include <util/eu_dst.h>
 #define ARDUINOJSON_USE_LONG_LONG 1
 #include <ArduinoJson.h>
 #include "Free_Fonts.h"
 #include "IniFile.h"
-
-struct tConfig {
-  char url[32];
-  char bootPic[64];
-  char userName[32];
-  int timeZone = 3600; // time zone offset in hours, must be corrected for internatinal use and DST
-  int dst = 0; // DST time offset in hours, must be corrected for internatinal use and DST
-  int show_mgdl = 1;
-  float yellow_low = 60;
-  float yellow_high = 180;
-  float red_low = 40;
-  float red_high = 200;
-  float snd_warning = 50;
-  float snd_alarm = 40;
-  uint8_t brightness1, brightness2, brightness3;
-  char wlan1ssid[32];
-  char wlan1pass[32];
-  char wlan2ssid[32];
-  char wlan2pass[32];
-  char wlan3ssid[32];
-  char wlan3pass[32];
-} ;
+#include "M5NSconfig.h"
 
 tConfig cfg;
 
-extern const unsigned char gImage_logoM5[];
 extern const unsigned char m5stack_startup_music[];
+extern const unsigned char WiFi_symbol[];
+extern const unsigned char alarmSndData[];
 
-const char* ntpServer = "pool.ntp.org";
+extern const unsigned char sun_icon16x16[];
+extern const unsigned char clock_icon16x16[];
+extern const unsigned char timer_icon16x16[];
+extern const unsigned char powerbutton_icon16x16[];
+
+extern const unsigned char bat0_icon16x16[];
+extern const unsigned char bat1_icon16x16[];
+extern const unsigned char bat2_icon16x16[];
+extern const unsigned char bat3_icon16x16[];
+extern const unsigned char bat4_icon16x16[];
+extern const unsigned char plug_icon16x16[];
+
+const char* ntpServer = "pool.ntp.org"; // "time.nist.gov", "time.google.com"
+struct tm localTimeInfo;
+int MAX_TIME_RETRY = 30;
+int lastSec = 61;
+int lastMin = 61;
+char localTimeStr[30];
 
 #ifndef min
-#define min(a,b) (((a) < (b)) ? (a) : (b))
+  #define min(a,b) (((a) < (b)) ? (a) : (b))
 #endif
 
 WiFiMulti WiFiMulti;
 unsigned long msCount;
-static uint8_t lcdBrightness = 2;
+unsigned long msCountLog;
+static uint8_t lcdBrightness = 10;
 static char *iniFilename = "/M5NS.INI";
 
 DynamicJsonDocument JSONdoc(16384);
 float last10sgv[10];
+int wasError = 0;
+time_t lastAlarmTime = 0;
+time_t lastSnoozeTime = 0;
+static uint8_t music_data[25000]; // 5s in sample rate 5000 samp/s
 
 void startupLogo() {
-  static uint8_t brightness, pre_brightness;
-  uint32_t length = strlen((char*)m5stack_startup_music);
-  M5.Lcd.setBrightness(0);
-  if (cfg.bootPic[0] == 0)
-    M5.Lcd.pushImage(0, 0, 320, 240, (uint16_t *)gImage_logoM5);
-  else
-    M5.Lcd.drawJpgFile(SD, cfg.bootPic);
-  M5.Lcd.setBrightness(100);
-  M5.update();
-//  M5.Speaker.playMusic(m5stack_startup_music, 25000);
-  delay(1000);
-  /*
-    for(int i=0; i<length; i++) {
-      dacWrite(SPEAKER_PIN, m5stack_startup_music[i]>>2);
-      delayMicroseconds(40);
-      brightness = (i/157);
-      if(pre_brightness != brightness) {
-          pre_brightness = brightness;
-          M5.Lcd.setBrightness(brightness);
+    static uint8_t brightness, pre_brightness;
+    M5.Lcd.setBrightness(0);
+    if(cfg.bootPic[0]==0) {
+      // M5.Lcd.pushImage(0, 0, 320, 240, (uint16_t *)gImage_logoM5);
+      M5.Lcd.drawString("M5 Stack", 120, 60, GFXFF);
+      M5.Lcd.drawString("Nightscout monitor", 60, 80, GFXFF);
+      M5.Lcd.drawString("(c) 2019 Martin Lukasek", 20, 120, GFXFF);
+    } else {
+      M5.Lcd.drawJpgFile(SD, cfg.bootPic);
+    }
+    M5.Lcd.setBrightness(100);
+    M5.update();
+    // M5.Speaker.playMusic(m5stack_startup_music,25000);
+    /*
+    int avg=0;
+    for(uint16_t i=0; i<40000; i++) {
+      avg+=m5stack_startup_music[i];
+      if(i%4 == 3) {
+        music_data[i/4]=avg/4;
+        avg=0;
       }
     }
+    play_music_data(10000, 100);
 
-    for(int i=255; i>=0; i--) {
-      M5.Lcd.setBrightness(i);
-      if(i<=32) {
-          // dacWrite(SPEAKER_PIN, i);
-      }
-      delay(2);
+    for(int i=0; i>=100; i++) {
+        M5.Lcd.setBrightness(i);
+        delay(2);
     }
-  */
-  M5.Lcd.fillScreen(BLACK);
-  delay(800);
-  for (int i = 0; i >= 100; i++) {
-    M5.Lcd.setBrightness(i);
-    delay(2);
-  }
+    */
 }
 
 void printLocalTime() {
-  struct tm timeinfo;
-  if (!getLocalTime(&timeinfo)) {
-    Serial.println("NO TIME");
-    M5.Lcd.println("NO TIME");
+  if(!getLocalTime(&localTimeInfo)){
+    Serial.println("Failed to obtain time");
+    M5.Lcd.println("Failed to obtain time");
     return;
   }
-  Serial.println(&timeinfo, "%A, %B %d %Y %H:%M:%S");
-  M5.Lcd.println(&timeinfo, "%A, %B %d %Y %H:%M:%S");
+  Serial.println(&localTimeInfo, "%A, %B %d %Y %H:%M:%S");
+  M5.Lcd.println(&localTimeInfo, "%A, %B %d %Y %H:%M:%S");
 }
 
-void sndAlarm() {
-  M5.Speaker.setVolume(8);
-  // M5.Speaker.beep(); //beep
-  M5.Speaker.update();
-  for (int j = 0; j < 6; j++) {
-    M5.Speaker.tone(660, 400);
-    for (int i = 0; i < 600; i++) {
-      delay(1);
-      M5.update();
+void play_music_data(uint32_t data_length, uint8_t volume) {
+  uint8_t vol;
+  if( volume>100 )
+    vol=1;
+  else
+    vol=101-volume;
+  if(vol != 101) {
+    ledcSetup(TONE_PIN_CHANNEL, 0, 13);
+    ledcAttachPin(SPEAKER_PIN, TONE_PIN_CHANNEL);
+    delay(10);
+    for(int i=0; i<data_length; i++) {
+      dacWrite(SPEAKER_PIN, music_data[i]/vol);
+      delayMicroseconds(194); // 200 = 1 000 000 microseconds / sample rate 5000
     }
+    /* takes too long
+    // slowly set DAC to zero from the last value
+    for(int t=music_data[data_length-1]; t>=0; t--) {
+      dacWrite(SPEAKER_PIN, t);
+      delay(2);
+    } */
+    for(int t = music_data[data_length - 1] / vol; t >= 0; t--) {
+      dacWrite(SPEAKER_PIN, t);
+      delay(2);
+    }
+    // dacWrite(SPEAKER_PIN, 0);
+    // delay(10);
+    ledcAttachPin(SPEAKER_PIN, TONE_PIN_CHANNEL);
+    ledcWriteTone(TONE_PIN_CHANNEL, 0);
+    CLEAR_PERI_REG_MASK(RTC_IO_PAD_DAC1_REG, RTC_IO_PDAC1_XPD_DAC | RTC_IO_PDAC1_DAC_XPD_FORCE);
   }
-  //M5.Speaker.playMusic(m5stack_startup_music, 25000);
-  M5.Speaker.mute();
-  M5.Speaker.update();
+}
+
+void play_tone(uint16_t frequency, uint32_t duration, uint8_t volume) {
+  // Serial.print("start fill music data "); Serial.println(millis());
+  uint32_t data_length = 5000;
+  if( duration*5 < data_length )
+    data_length = duration*5;
+  float interval = 2*M_PI*float(frequency)/float(5000);
+  for (int i=0;i<data_length;i++) {
+    music_data[i]=127+126*sin(interval*i);
+  }
+  // Serial.print("finish fill music data "); Serial.println(millis());
+  play_music_data(data_length, volume);
+}    
+
+void sndAlarm() {
+    for(int j=0; j<6; j++) {
+      if( cfg.dev_mode )
+        play_tone(660, 400, 1);
+      else
+        play_tone(660, 400, cfg.alarm_volume);
+      delay(200);
+    }
 }
 
 void sndWarning() {
-  M5.Speaker.setVolume(4);
-  M5.Speaker.update();
-  M5.Speaker.tone(3000, 100);
-  for (int i = 0; i < 400; i++) {
-    delay(1);
-    M5.update();
+  for(int j=0; j<3; j++) {
+    if( cfg.dev_mode )
+      play_tone(3000, 100, 1);
+    else
+      play_tone(3000, 100, cfg.warning_volume);
+    delay(300);
   }
-  M5.Speaker.tone(3000, 100);
-  for (int i = 0; i < 400; i++) {
-    delay(1);
-    M5.update();
-  }
-  M5.Speaker.tone(3000, 100);
-  for (int i = 0; i < 400; i++) {
-    delay(1);
-    M5.update();
-  }
-  M5.Speaker.mute();
-  M5.Speaker.update();
 }
+
+int tmpvol = 1;
+
+
 
 void buttons_test() {
-  if (M5.BtnA.wasPressed()) {
-    // M5.Lcd.printf("A");
-    Serial.printf("A");
-    // sndWarning();
-  }
 
-  if (M5.BtnB.wasPressed()) {
-    // M5.Lcd.printf("B");
-    Serial.printf("B");
-    // sndAlarm();
-    if (lcdBrightness == cfg.brightness1)
-      lcdBrightness = cfg.brightness2;
-    else if (lcdBrightness == cfg.brightness2)
-      lcdBrightness = cfg.brightness3;
-    else
-      lcdBrightness = cfg.brightness1;
-    M5.Lcd.setBrightness(lcdBrightness);
-  }
 
-  if (M5.BtnC.wasPressed()) {
-    // M5.Lcd.printf("C");
-    Serial.printf("C");
-    M5.setWakeupButton(BUTTON_A_PIN);
-    M5.powerOFF();
-  }
-}
-
-void wifi_connect() {
-  WiFi.mode(WIFI_STA);
-  WiFi.disconnect();
-  delay(100);
-
-  Serial.println("Conexion a Internet:");
-  M5.Lcd.println("Conexion a Internet:");
-
-  // We start by connecting to a WiFi network
-  if (cfg.wlan1ssid[0] != 0)
-    WiFiMulti.addAP(cfg.wlan1ssid, cfg.wlan1pass);
-  if (cfg.wlan2ssid[0] != 0)
-    WiFiMulti.addAP(cfg.wlan2ssid, cfg.wlan2pass);
-  if (cfg.wlan3ssid[0] != 0)
-    WiFiMulti.addAP(cfg.wlan3ssid, cfg.wlan3pass);
-
-  Serial.println();
-  M5.Lcd.println("");
-  Serial.print("Buscando WiFi...                   ");
-  M5.Lcd.print("Buscando WiFi...                   ");
-
-  while (WiFiMulti.run() != WL_CONNECTED) {
-    Serial.print(".");
-    M5.Lcd.print(".");
-    delay(500);
-  }
-
-  Serial.println("");
-  M5.Lcd.println("");
-  Serial.println("CONECTADO                              ");
-  M5.Lcd.println("CONECTADO                              ");
-  Serial.println("IP: ");
-  M5.Lcd.println("IP: ");
-  Serial.println(WiFi.localIP());
-  M5.Lcd.println(WiFi.localIP());
-
-  configTime(cfg.timeZone, cfg.dst, ntpServer);
-  delay(1000);
-  printLocalTime();
-
-  Serial.println("CONECTADO                              ");
-  M5.Lcd.println("CONECTADO                              ");
-}
-
-void printErrorMessage(uint8_t e, bool eol = true)
-{
-  switch (e) {
-    case IniFile::errorNoError:
-      Serial.print("OK");
-      break;
-    case IniFile::errorFileNotFound:
-      Serial.print("ARCHIVO NO ENCONTRADO");
-      break;
-    case IniFile::errorFileNotOpen:
-      Serial.print("ARCHIVO NO ABIERTO");
-      break;
-    case IniFile::errorBufferTooSmall:
-      Serial.print("BUFFER PEQUEÑO");
-      break;
-    case IniFile::errorSeekError:
-      Serial.print("BUSCAR ERROR");
-      break;
-    case IniFile::errorSectionNotFound:
-      Serial.print("SECCION NO ENCONTRADA");
-      break;
-    case IniFile::errorKeyNotFound:
-      Serial.print("CONTRASEÑA NO ENCONTRADA");
-      break;
-    case IniFile::errorEndOfFile:
-      Serial.print("FIN DE ARCHIVO");
-      break;
-    case IniFile::errorUnknownError:
-      Serial.print("ERROR DESCONOCIDO");
-      break;
-    default:
-      Serial.print("VALOR DE ERROR DESCONOCIDO");
-      break;
-  }
-  if (eol)
-    Serial.println();
-}
-
-void readConfiguration() {
-  const size_t bufferLen = 80;
-  char buffer[bufferLen];
-
-  IniFile ini(iniFilename); //(uint8_t)"/M5NS.INI"
-
-  if (!ini.open()) {
-    Serial.print("Ini file ");
-    Serial.print(iniFilename);
-    Serial.println(" does not exist");
-    M5.Lcd.println("No INI file");
-    // Cannot do anything else
-    while (1)
-      ;
-  }
-  Serial.println("Ini file exists");
-
-  // Check the file is valid. This can be used to warn if any lines
-  // are longer than the buffer.
-  if (!ini.validate(buffer, bufferLen)) {
-    Serial.print("ini file ");
-    Serial.print(ini.getFilename());
-    Serial.print(" not valid: ");
-    printErrorMessage(ini.getError());
-    // Cannot do anything else
-    M5.Lcd.println("ERROR ARCHIVO INI");
-    while (1)
-      ;
-  }
-
-  // Fetch a value from a key which is present
-  if (ini.getValue("config", "nightscout", buffer, bufferLen)) {
-    Serial.print("section 'config' has an entry 'nightscout' with value ");
-    Serial.println(buffer);
-    strcpy(cfg.url, buffer);
-  }
-  else {
-    Serial.print("Could not read 'nightscout' from section 'config', error was ");
-    printErrorMessage(ini.getError());
-    M5.Lcd.println("No URL in INI file");
-    while (1)
-      ;
-  }
-
-  if (ini.getValue("config", "bootpic", buffer, bufferLen)) {
-    Serial.print("bootpic = ");
-    Serial.println(buffer);
-    strcpy(cfg.bootPic, buffer);
-  }
-  else {
-    Serial.println("NO bootpic");
-    cfg.bootPic[0] = 0;
-  }
-
-  if (ini.getValue("config", "name", buffer, bufferLen)) {
-    Serial.print("name = ");
-    Serial.println(buffer);
-    strcpy(cfg.userName, buffer);
-  }
-  else {
-    Serial.println("NO user name");
-    strcpy(cfg.userName, " ");
-  }
-
-  if (ini.getValue("config", "time_zone", buffer, bufferLen)) {
-    Serial.print("time_zone = ");
-    cfg.timeZone = atoi(buffer);
-    Serial.println(cfg.timeZone);
-  }
-  else {
-    Serial.println("NO time zone defined -> Central Europe");
-    cfg.timeZone = 3600;
-  }
-
-  if (ini.getValue("config", "dst", buffer, bufferLen)) {
-    Serial.print("dst = ");
-    cfg.dst = atoi(buffer);
-    Serial.println(cfg.dst);
-  }
-  else {
-    Serial.println("NO DST defined -> summer time");
-    cfg.dst = 3600;
-  }
-
-  if (ini.getValue("config", "show_mgdl", buffer, bufferLen)) {
-    Serial.print("show_mgdl = ");
-    cfg.show_mgdl = atoi(buffer);
-    Serial.println(cfg.show_mgdl);
-  }
-  else {
-    Serial.println("NO show_mgdl defined -> 0 = show mmol/L");
-    cfg.show_mgdl = 0;
+  if(M5.BtnA.wasPressed()) {
+      // M5.Lcd.printf("A");
+      Serial.printf("A");
+      // play_tone(1000, 10, 1);
+      // sndAlarm();
+      if(lcdBrightness==cfg.brightness1) 
+        lcdBrightness = cfg.brightness2;
+      else
+        if(lcdBrightness==cfg.brightness2) 
+          lcdBrightness = cfg.brightness3;
+        else
+          lcdBrightness = cfg.brightness1;
+      M5.Lcd.setBrightness(lcdBrightness);
   }
 
 
-  if (ini.getValue("config", "yellow_low", buffer, bufferLen)) {
-    Serial.print("yellow_low = ");
-    cfg.yellow_low = atof(buffer);
-    if ( cfg.show_mgdl )
-      cfg.yellow_low /= 18.0;
-    Serial.println(cfg.yellow_low);
-  }
-  else {
-    Serial.println("NO yellow_low defined");
-    cfg.yellow_low = 4.5;
-  }
-
-  if (ini.getValue("config", "yellow_high", buffer, bufferLen)) {
-    Serial.print("yellow_high = ");
-    cfg.yellow_high = atof(buffer);
-    if ( cfg.show_mgdl )
-      cfg.yellow_high /= 18.0;
-    Serial.println(cfg.yellow_high);
-  }
-  else {
-    Serial.println("NO yellow_high defined");
-    cfg.yellow_high = 9.0;
-  }
-
-  if (ini.getValue("config", "red_low", buffer, bufferLen)) {
-    Serial.print("red_low = ");
-    cfg.red_low = atof(buffer);
-    if ( cfg.show_mgdl )
-      cfg.red_low /= 18.0;
-    Serial.println(cfg.red_low);
-  }
-  else {
-    Serial.println("NO red_low defined");
-    cfg.red_low = 3.9;
-  }
-
-  if (ini.getValue("config", "red_high", buffer, bufferLen)) {
-    Serial.print("red_high = ");
-    cfg.red_high = atof(buffer);
-    if ( cfg.show_mgdl )
-      cfg.red_high /= 18.0;
-    Serial.println(cfg.red_high);
-  }
-  else {
-    Serial.println("NO red_high defined");
-    cfg.red_high = 9.0;
+  
+  if(M5.BtnB.wasPressed()) {
+      Serial.printf("B");
+      struct tm timeinfo;
+      if(!getLocalTime(&timeinfo)){
+        lastSnoozeTime=0;
+      } else {
+        lastSnoozeTime=mktime(&timeinfo);
+      }
+      M5.Lcd.setTextSize(1);
+      M5.Lcd.setFreeFont(FSSB12);
+      M5.Lcd.fillRect(165, 220, 50, 30, TFT_WHITE);
+      M5.Lcd.setTextColor(TFT_BLACK, TFT_WHITE);
+      char tmpStr[10];
+      sprintf(tmpStr, "%i", cfg.snooze_timeout);
+      int txw=M5.Lcd.textWidth(tmpStr);
+      Serial.print("Set SNOOZE: "); Serial.println(tmpStr);
+      M5.Lcd.drawString(tmpStr, 203-txw/2, 229, GFXFF);
+      
+      M5.Lcd.drawLine(215, 210, 215, 240, TFT_BLACK);           // VERTICAL LINE
+      M5.Lcd.drawLine(216, 210, 216, 240, TFT_BLACK);           // VERTICAL LINE
+      M5.Lcd.drawLine(217, 210, 217, 240, TFT_BLACK);           // VERTICAL LINE
+      M5.Lcd.drawLine(218, 210, 218, 240, TFT_BLACK);           // VERTICAL LINE
+      M5.Lcd.drawLine(219, 210, 219, 240, TFT_BLACK);           // VERTICAL LINE
+      M5.Lcd.drawLine(220, 210, 220, 240, TFT_BLACK);           // VERTICAL LINE
+      M5.Lcd.drawLine(221, 210, 221, 240, TFT_BLACK);           // VERTICAL LINE
+      M5.Lcd.drawLine(222, 210, 222, 240, TFT_BLACK);           // VERTICAL LINE
+      M5.Lcd.drawLine(223, 210, 223, 240, TFT_BLACK);           // VERTICAL LINE
+      M5.Lcd.drawLine(224, 210, 224, 240, TFT_BLACK);           // VERTICAL LINE
+      M5.Lcd.drawLine(165, 210, 215, 210, TFT_BLACK);           // HORIZONTAL LINE
+      M5.Lcd.drawLine(165, 211, 215, 211, TFT_BLACK);           // HORIZONTAL LINE
+      M5.Lcd.drawLine(165, 212, 215, 212, TFT_BLACK);           // HORIZONTAL LINE
+      M5.Lcd.drawLine(165, 213, 215, 213, TFT_BLACK);           // HORIZONTAL LINE
+      M5.Lcd.drawLine(165, 214, 215, 214, TFT_BLACK);           // HORIZONTAL LINE
+      M5.Lcd.drawLine(165, 215, 215, 215, TFT_BLACK);           // HORIZONTAL LINE
+      M5.Lcd.drawLine(165, 216, 215, 216, TFT_BLACK);           // HORIZONTAL LINE
+      M5.Lcd.drawLine(165, 217, 215, 217, TFT_BLACK);           // HORIZONTAL LINE
+      M5.Lcd.drawLine(165, 218, 215, 218, TFT_BLACK);           // HORIZONTAL LINE
+      M5.Lcd.drawLine(165, 219, 215, 219, TFT_BLACK);           // HORIZONTAL LINE
   }
 
-  if (ini.getValue("config", "snd_warning", buffer, bufferLen)) {
-    Serial.print("snd_warning = ");
-    cfg.snd_warning = atof(buffer);
-    if ( cfg.show_mgdl )
-      cfg.snd_warning /= 18.0;
-    Serial.println(cfg.snd_warning);
-  }
-  else {
-    Serial.println("NO snd_warning defined");
-    cfg.snd_warning = 3.7;
-  }
+   
+  if(M5.BtnC.wasPressed()) {
+     Serial.printf("C");
+     M5.Lcd.fillScreen(WHITE);
 
-  if (ini.getValue("config", "snd_alarm", buffer, bufferLen)) {
-    Serial.print("snd_alarm = ");
-    cfg.snd_alarm = atof(buffer);
-    if ( cfg.show_mgdl )
-      cfg.snd_alarm /= 18.0;
-    Serial.println(cfg.snd_alarm);
-  }
-  else {
-    Serial.println("NO snd_alarm defined");
-    cfg.snd_alarm = 3.0;
-  }
+// BATTERY SECTION
 
-  if (ini.getValue("config", "brightness1", buffer, bufferLen)) {
-    Serial.print("brightness1 = ");
-    Serial.println(buffer);
-    cfg.brightness1 = atoi(buffer);
-    if (cfg.brightness1 < 1 || cfg.brightness1 > 100)
-      cfg.brightness1 = 50;
-  }
-  else {
-    Serial.println("NO brightness1");
-    cfg.brightness1 = 50;                                               // brightness 1 = 50%
-  }
+    M5.Lcd.setFreeFont(FMB12);
+    M5.Lcd.setTextColor(TFT_BLACK);
+    M5.Lcd.setCursor(0, 50);
+    M5.Lcd.setTextSize(1);
+    M5.Lcd.print("BATTERY STATUS: ");
+    M5.Lcd.print(getBatteryLevel());
+    M5.Lcd.print(" %");
 
-  if (ini.getValue("config", "brightness2", buffer, bufferLen)) {
-    Serial.print("brightness2 = ");
-    Serial.println(buffer);
-    cfg.brightness2 = atoi(buffer);
-    if (cfg.brightness2 < 1 || cfg.brightness2 > 100)
-      cfg.brightness2 = 100;                                            // brightness 2 = 100%
-  }
-  else {
-    Serial.println("NO brightness2");
-    cfg.brightness2 = 100;
-  }
-  if (ini.getValue("config", "brightness3", buffer, bufferLen)) {
-    Serial.print("brightness3 = ");
-    Serial.println(buffer);
-    cfg.brightness3 = atoi(buffer);
-    if (cfg.brightness3 < 1 || cfg.brightness3 > 100)
-      cfg.brightness3 = 2;                                              // brightness 3 = 2%
-  }
-  else {
-    Serial.println("NO brightness3");
-    cfg.brightness3 = 2;
-  }
+// SSDI SECTION
 
-  if (ini.getValue("wlan1", "ssid", buffer, bufferLen)) {
-    Serial.print("wlan1ssid = ");
-    Serial.println(buffer);
-    strcpy(cfg.wlan1ssid, buffer);
-  }
-  else {
-    Serial.println("NO wlan1 ssid");
-    cfg.wlan1ssid[0] = 0;
-  }
+    M5.Lcd.setCursor(0, 100);
+    M5.Lcd.setTextSize(1);
+    M5.Lcd.print("WiFi:                           ");
+    M5.Lcd.print(WiFi.SSID());
 
-  if (ini.getValue("wlan1", "pass", buffer, bufferLen)) {
-    Serial.print("wlan1pass = ");
-    Serial.println(buffer);
-    strcpy(cfg.wlan1pass, buffer);
-  }
-  else {
-    Serial.println("NO wlan1 pass");
-    cfg.wlan1pass[0] = 0;
-  }
+//  USER SECTION
 
-  if (ini.getValue("wlan2", "ssid", buffer, bufferLen)) {
-    Serial.print("wlan2ssid = ");
-    Serial.println(buffer);
-    strcpy(cfg.wlan2ssid, buffer);
-  }
-  else {
-    Serial.println("NO wlan2 ssid");
-    cfg.wlan2ssid[0] = 0;
-  }
+    M5.Lcd.drawString(cfg.userName, 0, 180, GFXFF);
+     
+    delay(1000);
+     
+/*     void drawMiniGraph() {
+     M5.Lcd.fillScreen(BLACK);
+     int i;
+     float glk;
+     uint16_t sgvColor;
 
-  if (ini.getValue("wlan2", "pass", buffer, bufferLen)) {
-    Serial.print("wlan2pass = ");
-    Serial.println(buffer);
-    strcpy(cfg.wlan2pass, buffer);
-  }
-  else {
-    Serial.println("NO wlan2 pass");
-    cfg.wlan2pass[0] = 0;
-  }
-
-  if (ini.getValue("wlan3", "ssid", buffer, bufferLen)) {
-    Serial.print("wlan3ssid = ");
-    Serial.println(buffer);
-    strcpy(cfg.wlan3ssid, buffer);
-  }
-  else {
-    Serial.println("NO wlan3 ssid");
-    cfg.wlan3ssid[0] = 0;
-  }
-
-  if (ini.getValue("wlan3", "pass", buffer, bufferLen)) {
-    Serial.print("wlan3pass = ");
-    Serial.println(buffer);
-    strcpy(cfg.wlan3pass, buffer);
-  }
-  else {
-    Serial.println("NO wlan3 pass");
-    cfg.wlan3pass[0] = 0;
-  }
-}
-
-
-
-int8_t getBatteryLevel()                    // battery
-{
-  Wire.beginTransmission(0x75);
-  Wire.write(0x78);
-  if (Wire.endTransmission(false) == 0
-      && Wire.requestFrom(0x75, 1)) {
-    switch (Wire.read() & 0xF0) {
-      case 0xE0: return 1;
-      case 0xC0: return 2;
-      case 0x80: return 3;
-      case 0x00: return 4;
-      default: return 0;
-    }
-  }
-  return -1;
-}
-
-
-
-// the setup routine runs once when M5Stack starts up
-void setup() {
-  // initialize the M5Stack object
-  M5.begin();
-//  M5.Lcd.setRotation(3);                            // SCREEN ORIENTATION 1=landscape 2=cable at bottom 3=upside down 4=mirror portrait 5=mirror upside down 6=mirror portrait 7=mirror landscape 8=cable on top 9=landscape
-
-  // prevent button A "ghost" random presses
-  Wire.begin();
-
-
-
-  // M5.Speaker.mute();
-
-  // Lcd display
-  M5.Lcd.setBrightness(100);
-  M5.Lcd.fillScreen(BLACK);
-  M5.Lcd.setTextColor(WHITE);
-  M5.Lcd.setCursor(0, 0);
-  M5.Lcd.setTextSize(2);
-  yield();
-
-  Serial.println(ESP.getFreeHeap());
-
-  readConfiguration();
-  lcdBrightness = cfg.brightness1;
-  M5.Lcd.setBrightness(lcdBrightness);
-
-  startupLogo();
-  //M5.Speaker.mute();
-  yield();
-
-  M5.Lcd.setBrightness(lcdBrightness);
-  wifi_connect();
-  yield();
-
-  M5.Lcd.setBrightness(lcdBrightness);
-  M5.Lcd.fillScreen(BLACK);
-
-  // update glycemia now
-  msCount = millis() - 16000;
-
-
-}
-
-void arrow(int x, int y, int asize, int aangle, int pwidth, int plength, uint16_t color) {
-  float dx = (asize - 10) * cos(aangle - 90) * PI / 180 + x; // calculate X position
-  float dy = (asize - 10) * sin(aangle - 90) * PI / 180 + y; // calculate Y position
-  float x1 = 0;         float y1 = plength;
-  float x2 = pwidth / 2;  float y2 = pwidth / 2;
-  float x3 = -pwidth / 2; float y3 = pwidth / 2;
-  float angle = aangle * PI / 180 - 135;
-  float xx1 = x1 * cos(angle) - y1 * sin(angle) + dx;
-  float yy1 = y1 * cos(angle) + x1 * sin(angle) + dy;
-  float xx2 = x2 * cos(angle) - y2 * sin(angle) + dx;
-  float yy2 = y2 * cos(angle) + x2 * sin(angle) + dy;
-  float xx3 = x3 * cos(angle) - y3 * sin(angle) + dx;
-  float yy3 = y3 * cos(angle) + x3 * sin(angle) + dy;
-  M5.Lcd.fillTriangle(xx1, yy1, xx3, yy3, xx2, yy2, color);
-  M5.Lcd.drawLine(x, y, xx1, yy1, color);
-  M5.Lcd.drawLine(x + 1, y, xx1 + 1, yy1, color);
-  M5.Lcd.drawLine(x, y + 1, xx1, yy1 + 1, color);
-  M5.Lcd.drawLine(x - 1, y, xx1 - 1, yy1, color);
-  M5.Lcd.drawLine(x, y - 1, xx1, yy1 - 1, color);
-  M5.Lcd.drawLine(x + 2, y, xx1 + 2, yy1, color);
-  M5.Lcd.drawLine(x, y + 2, xx1, yy1 + 2, color);
-  M5.Lcd.drawLine(x - 2, y, xx1 - 2, yy1, color);
-  M5.Lcd.drawLine(x, y - 2, xx1, yy1 - 2, color);
-}
-
-
-
-// GRAPH SECTION
-
-
-
-void drawMiniGraph() {
-  /*
-    // draw help lines
-    for(int i=0; i<320; i+=40) {
-    M5.Lcd.drawLine(i, 0, i, 240, 0x333333);
-    }
-    for(int i=0; i<240; i+=30) {
-    M5.Lcd.drawLine(0, i, 320, i, 0x333333);
-    }
-    M5.Lcd.drawLine(0, 120, 320, 120, TFT_DARKGREY);
-    M5.Lcd.drawLine(160, 0, 160, 240, TFT_DARKGREY);
-  */
-  int i;
-  float glk;
-  uint16_t sgvColor;
-  // M5.Lcd.drawLine(231, 110, 319, 110, 0x333333);       // (x start, y start, x finish, y finish)
-  // M5.Lcd.drawLine(231, 110, 231, 207, 0x333333);
-  // M5.Lcd.drawLine(231, 207, 319, 207, 0x333333);
-  // M5.Lcd.drawLine(319, 110, 319, 207, 0x333333);
-//  M5.Lcd.drawLine(185, 113, 319, 113, 0x333333);                                                 // TOP LINE
-//  M5.Lcd.drawLine(231, 175, 319, 175, 0x333333);                                                 // TARGET LINE
-//  M5.Lcd.drawLine(231, 203, 319, 203, 0x333333);                                                 // LOW LINE
-  // M5.Lcd.drawLine(185, 230, 319, 230, 0x333333);                                                 // BOTTOM LINE
-  // M5.Lcd.drawLine(231, 200 - (4 - 3) * 10 + 3, 319, 200 - (4 - 3) * 10 + 3, TFT_DARKGREY);
-  // M5.Lcd.drawLine(215, 200 - (9 - 3) * 10 + 3, 319, 200 - (9 - 3) * 10 + 3, TFT_YELLOW);
-//  M5.Lcd.drawLine(231, 134, 319, 134, 0x333333);                                                 // HIGH LINE
+  M5.Lcd.drawLine(0, 0, 319, 0, TFT_RED);                                                         // TOP LINE
+  M5.Lcd.drawLine(0, 25, 319, 25, TFT_YELLOW);                                                    // HIGH URGENT LINE
+  M5.Lcd.drawLine(0, 50, 319, 50, TFT_GREEN);                                                     // GREEN ZONE LINE
+  M5.Lcd.drawLine(0, 75, 319, 75, TFT_GREEN);                                                     // GREEN ZONE LINE
+  M5.Lcd.drawLine(0, 100, 319, 100, TFT_GREEN);                                                   // GREEN ZONE LINE
+  M5.Lcd.drawLine(0, 125, 319, 125, TFT_GREEN);                                                   // GREEN ZONE LINE
+  M5.Lcd.drawLine(0, 150, 319, 150, TFT_GREEN);                                                   // TARGET LINE
+  M5.Lcd.drawLine(0, 175, 319, 175, TFT_GREEN);                                                   // RED ZONE LINE
+  M5.Lcd.drawLine(0, 200, 319, 200, TFT_GREEN);                                                   // RED ZONE LINE
+  M5.Lcd.drawLine(0, 225, 319, 225, TFT_RED);                                                     // LOW LINE
+  M5.Lcd.drawLine(0, 250, 319, 250, TFT_MAGENTA);                                                 // MAGENTA ZONE LINE
+  
   Serial.print("Last 10 values: ");
   for (i = 9; i >= 0; i--) {
-    sgvColor = 0x333333;
+    sgvColor = TFT_GREEN;
     glk = *(last10sgv + 9 - i);
     if (glk > 12) {
       glk = 12;
@@ -669,80 +305,412 @@ void drawMiniGraph() {
       }
     }
     if (glk < cfg.red_low || glk > cfg.red_high) {
-      sgvColor = TFT_DARKGREY;
+      sgvColor = TFT_RED;
     } else {
       if (glk < cfg.yellow_low || glk > cfg.yellow_high) {
-        sgvColor = 0x333333;
+        sgvColor = TFT_YELLOW;
       }
     }
     Serial.print(*(last10sgv + i)); Serial.print(" ");
-//    M5.Lcd.fillCircle(234 + i * 9, 203 - (glk - 3.0) * 10.0, 3, sgvColor);
+    M5.Lcd.fillCircle(0 + i * 30, 0 - (glk - 3.0) * 10.0, 3, sgvColor);   // (x start + i * separation, y - (glk - 3.0) * 10.0, radius, color)
   }
   Serial.println();
 }
+
+void drawIcon(int16_t x, int16_t y, const uint8_t *bitmap, uint16_t color) {
+  int16_t w = 16;
+  int16_t h = 16; 
+  int32_t i, j, byteWidth = (w + 7) / 8;
+  for (j = 0; j < h; j++) {
+    for (i = 0; i < w; i++) {
+      if (pgm_read_byte(bitmap + j * byteWidth + i / 8) & (128 >> (i & 7))) {
+        M5.Lcd.drawPixel(x + i, y + j, color);
+  
+  delay(1000);
+
+      }
+    }
+  }
+ }
+
+*/
+
+
+}
+}
+
+void wifi_connect() {
+  WiFi.mode(WIFI_STA);
+  WiFi.disconnect();
+  delay(100);
+
+  Serial.println("WiFi connect start");
+  M5.Lcd.println("WiFi connect start");
+
+  // We start by connecting to a WiFi network
+  for(int i=0; i<=9; i++) {
+    if((cfg.wlanssid[i][0]!=0) && (cfg.wlanpass[i][0]!=0))
+      WiFiMulti.addAP(cfg.wlanssid[i], cfg.wlanpass[i]);
+  }
+
+  Serial.println();
+  M5.Lcd.println("");
+  Serial.print("Wait for WiFi... ");
+  M5.Lcd.print("Wait for WiFi... ");
+
+  while(WiFiMulti.run() != WL_CONNECTED) {
+      Serial.print(".");
+      M5.Lcd.print(".");
+      delay(500);
+  }
+
+  Serial.println("");
+  M5.Lcd.println("");
+  Serial.print("WiFi connected to SSID "); Serial.println(WiFi.SSID());
+  M5.Lcd.print("WiFi SSID "); M5.Lcd.println(WiFi.SSID());
+  Serial.println("IP address: ");
+  M5.Lcd.println("IP address: ");
+  Serial.println(WiFi.localIP());
+  M5.Lcd.println(WiFi.localIP());
+
+  configTime(cfg.timeZone, cfg.dst, ntpServer, "time.nist.gov", "time.google.com");
+  delay(1000);
+  Serial.print("Waiting for time.");
+  int i = 0;
+  while(!getLocalTime(&localTimeInfo)) {
+    Serial.print(".");
+    delay(1000);
+    i++;
+    if (i > MAX_TIME_RETRY) {
+      Serial.print("Gave up waiting for time to have a valid value.");
+      break;
+    }
+  }
+  Serial.println();
+  printLocalTime();
+
+  Serial.println("Connection done");
+  M5.Lcd.println("Connection done");
+}
+
+int8_t getBatteryLevel()
+{
+  Wire.beginTransmission(0x75);
+  Wire.write(0x78);
+  if (Wire.endTransmission(false) == 0
+   && Wire.requestFrom(0x75, 1)) {
+    int8_t bdata=Wire.read();
+    /* 
+    // write battery info to logfile.txt
+    File fileLog = SD.open("/logfile.txt", FILE_WRITE);    
+    if(!fileLog) {
+      Serial.println("Cannot write to logfile.txt");
+    } else {
+      int pos = fileLog.seek(fileLog.size());
+      struct tm timeinfo;
+      getLocalTime(&timeinfo);
+      fileLog.print(asctime(&timeinfo));
+      fileLog.print("   Battery level: "); fileLog.println(bdata, HEX);
+      fileLog.close();
+      Serial.print("Log file written: "); Serial.print(asctime(&timeinfo));
+    }
+    */
+    switch (bdata & 0xF0) {
+      case 0xE0: return 25;
+      case 0xC0: return 50;
+      case 0x80: return 75;
+      case 0x00: return 100;
+      default: return 0;
+    }
+  }
+  return -1;
+}
+
+// the setup routine runs once when M5Stack starts up
+void setup() {
+    // initialize the M5Stack object
+    M5.begin();
+    // prevent button A "ghost" random presses
+    Wire.begin();
+    SD.begin();
+    
+    // M5.Speaker.mute();
+
+    // Lcd display
+    M5.Lcd.setBrightness(100);
+    M5.Lcd.fillScreen(BLACK);
+    M5.Lcd.setTextColor(WHITE);
+    M5.Lcd.setCursor(0, 0);
+    M5.Lcd.setTextSize(2);
+    yield();
+
+    Serial.print("Free Heap: "); Serial.println(ESP.getFreeHeap());
+
+    uint8_t cardType = SD.cardType();
+
+    if(cardType == CARD_NONE){
+        Serial.println("No SD card attached");
+        M5.Lcd.println("No SD card attached");
+        while(1);
+    }
+
+    Serial.print("SD Card Type: ");
+    M5.Lcd.print("SD Card Type: ");
+    if(cardType == CARD_MMC){
+        Serial.println("MMC");
+        M5.Lcd.println("MMC");
+    } else if(cardType == CARD_SD){
+        Serial.println("SDSC");
+        M5.Lcd.println("SDSC");
+    } else if(cardType == CARD_SDHC){
+        Serial.println("SDHC");
+        M5.Lcd.println("SDHC");
+    } else {
+        Serial.println("UNKNOWN");
+        M5.Lcd.println("UNKNOWN");
+    }
+
+    uint64_t cardSize = SD.cardSize() / (1024 * 1024);
+    Serial.printf("SD Card Size: %llu MB\n", cardSize);
+    M5.Lcd.printf("SD Card Size: %llu MB\n", cardSize);
+
+    readConfiguration(iniFilename, &cfg);
+    // strcpy(cfg.url, "user.herokuapp.com");
+    // cfg.dev_mode = 0;
+    // cfg.show_mgdl = 1;
+    // cfg.show_COB_IOB = 0;
+    // cfg.snd_warning = 5.5;
+    // cfg.snd_alarm = 4.5;
+    // cfg.snd_warning_high = 9;
+    // cfg.snd_alarm_high = 14;
+    // cfg.alarm_volume = 0;
+    // cfg.warning_volume = 0;
+    // cfg.snd_warning_at_startup = 1;
+    // cfg.snd_alarm_at_startup = 1;
+  
+    // cfg.alarm_repeat = 1;
+    // cfg.snooze_timeout = 2;
+    // cfg.brightness1 = 0;
+    // cfg.info_line = 1;
+    
+    lcdBrightness = cfg.brightness1;
+    M5.Lcd.setBrightness(lcdBrightness);
+    
+    startupLogo();
+    yield();
+
+    if(cfg.snd_warning_at_startup) {
+      play_tone(3000, 100, cfg.warning_volume);
+      delay(500);
+    }
+    if(cfg.snd_alarm_at_startup) {
+      play_tone(660, 400, cfg.alarm_volume);
+      delay(500);
+    }
+    M5.Lcd.fillScreen(BLACK);
+
+    M5.Lcd.setBrightness(lcdBrightness);
+    wifi_connect();
+    yield();
+
+    M5.Lcd.setBrightness(lcdBrightness);
+    M5.Lcd.fillScreen(BLACK);
+
+    // test file with time stamps
+    // msCountLog = millis()-6000;
+     
+    // update glycemia now
+    msCount = millis()-16000;
+}
+
+void drawArrow(int x, int y, int asize, int aangle, int pwidth, int plength, uint16_t color){
+  float dx = (asize-10)*cos(aangle-90)*PI/180+x; // calculate X position  
+  float dy = (asize-10)*sin(aangle-90)*PI/180+y; // calculate Y position  
+  float x1 = 0;         float y1 = plength;
+  float x2 = pwidth/2;  float y2 = pwidth/2;
+  float x3 = -pwidth/2; float y3 = pwidth/2;
+  float angle = aangle*PI/180-135;
+  float xx1 = x1*cos(angle)-y1*sin(angle)+dx;
+  float yy1 = y1*cos(angle)+x1*sin(angle)+dy;
+  float xx2 = x2*cos(angle)-y2*sin(angle)+dx;
+  float yy2 = y2*cos(angle)+x2*sin(angle)+dy;
+  float xx3 = x3*cos(angle)-y3*sin(angle)+dx;
+  float yy3 = y3*cos(angle)+x3*sin(angle)+dy;
+  M5.Lcd.fillTriangle(xx1,yy1,xx3,yy3,xx2,yy2, color);
+  M5.Lcd.drawLine(x, y, xx1, yy1, color);
+  M5.Lcd.drawLine(x+1, y, xx1+1, yy1, color);
+  M5.Lcd.drawLine(x, y+1, xx1, yy1+1, color);
+  M5.Lcd.drawLine(x-1, y, xx1-1, yy1, color);
+  M5.Lcd.drawLine(x, y-1, xx1, yy1-1, color);
+  M5.Lcd.drawLine(x+2, y, xx1+2, yy1, color);
+  M5.Lcd.drawLine(x, y+2, xx1, yy1+2, color);
+  M5.Lcd.drawLine(x-2, y, xx1-2, yy1, color);
+  M5.Lcd.drawLine(x, y-2, xx1, yy1-2, color);
+}
+
+void drawMiniGraph(){
+  /*
+  // draw help lines
+  for(int i=0; i<320; i+=40) {
+    M5.Lcd.drawLine(i, 0, i, 240, TFT_DARKGREY);
+  }
+  for(int i=0; i<240; i+=30) {
+    M5.Lcd.drawLine(0, i, 320, i, TFT_DARKGREY);
+  }
+  M5.Lcd.drawLine(0, 120, 320, 120, TFT_LIGHTGREY);
+  M5.Lcd.drawLine(160, 0, 160, 240, TFT_LIGHTGREY);
+  */
+  int i;
+  float glk;
+  uint16_t sgvColor;
+  // M5.Lcd.drawLine(231, 110, 319, 110, TFT_DARKGREY);
+  // M5.Lcd.drawLine(231, 110, 231, 207, TFT_DARKGREY);
+  // M5.Lcd.drawLine(231, 207, 319, 207, TFT_DARKGREY);
+  // M5.Lcd.drawLine(319, 110, 319, 207, TFT_DARKGREY);
+//  M5.Lcd.drawLine(231, 113, 319, 113, TFT_LIGHTGREY);
+//  M5.Lcd.drawLine(231, 203, 319, 203, TFT_LIGHTGREY);
+//  M5.Lcd.drawLine(231, 200-(4-3)*10+3, 319, 200-(4-3)*10+3, TFT_LIGHTGREY);
+//  M5.Lcd.drawLine(231, 200-(9-3)*10+3, 319, 200-(9-3)*10+3, TFT_LIGHTGREY);
+//  Serial.print("Last 10 values: ");
+  for(i=9; i>=0; i--) {
+    sgvColor = TFT_GREEN;
+    glk = *(last10sgv+9-i);
+    if(glk>12) {
+      glk = 12;
+    } else {
+      if(glk<3) {
+        glk = 3;
+      }
+    }
+    if(glk<cfg.red_low || glk>cfg.red_high) {
+      sgvColor = TFT_RED;
+    } else {
+      if(glk<cfg.yellow_low || glk>cfg.yellow_high) {
+        sgvColor = TFT_YELLOW;
+      }
+    }
+//    Serial.print(*(last10sgv+i)); Serial.print(" ");
+    if(*(last10sgv+9-i)!=0)
+      M5.Lcd.fillCircle(1234+i*9, 1203-(glk-3.0)*10.0, 3, sgvColor);
+  }
+  Serial.println();
+}
+void drawIcon(int16_t x, int16_t y, const uint8_t *bitmap, uint16_t color) {
+  int16_t w = 16;
+  int16_t h = 16; 
+  int32_t i, j, byteWidth = (w + 7) / 8;
+  for (j = 0; j < h; j++) {
+    for (i = 0; i < w; i++) {
+      if (pgm_read_byte(bitmap + j * byteWidth + i / 8) & (128 >> (i & 7))) {
+        M5.Lcd.drawPixel(x + i, y + j, color);
+      }
+    }
+  }
+}
+
 void update_glycemia() {
+  char loopInfoStr[64];
+  char basalInfoStr[64];
+  char tmpstr[255];
+  
   M5.Lcd.setTextDatum(TL_DATUM);
   M5.Lcd.setTextColor(WHITE, BLACK);
   M5.Lcd.setTextSize(1);
   M5.Lcd.setCursor(0, 0);
+  // if there was an error, then clear whole screen, otherwise only graphic updated part
+  if( wasError ) {
+    M5.Lcd.fillScreen(BLACK);
+  } else {
+//    M5.Lcd.fillRect(230, 110, 90, 100, TFT_BLACK);
+  }
+  // M5.Lcd.drawJpgFile(SD, "/WiFi_symbol.jpg", 242, 130);
+//  M5.Lcd.drawBitmap(242, 130, 64, 48, (uint16_t *)WiFi_symbol);
   // uint16_t maxWidth, uint16_t maxHeight, uint16_t offX, uint16_t offY, jpeg_div_t scale);
-  if ((WiFiMulti.run() == WL_CONNECTED)) {
+  if((WiFiMulti.run() == WL_CONNECTED)) {
 
     HTTPClient http;
 
     Serial.print("[HTTP] begin...\n");
     // configure target server and url
     char NSurl[128];
-    strcpy(NSurl, "https://");
-    strcat(NSurl, cfg.url);
-    strcat(NSurl, "/api/v1/entries.json");
-    http.begin(NSurl); //HTTP
+    if(strncmp(cfg.url, "http", 4))
+      strcpy(NSurl,"https://");
+    else
+      strcpy(NSurl,"");
+    strcat(NSurl,cfg.url);
+    strcat(NSurl,"/api/v1/entries.json");
 
+    // begin Peter Leimbach
+    if (strlen(cfg.token) > 0){
+      strcat(NSurl,"?token=");
+      strcat(NSurl,cfg.token);
+    }
+    // end Peter Leimbach
+    
+    Serial.print("JSON query NSurl = \'");Serial.print(NSurl);Serial.print("\'\n");
+    http.begin(NSurl); //HTTP
+    
     Serial.print("[HTTP] GET...\n");
     // start connection and send HTTP header
     int httpCode = http.GET();
-
+  
     // httpCode will be negative on error
-    if (httpCode > 0) {
+    if(httpCode > 0) {
       // HTTP header has been send and Server response header has been handled
       Serial.printf("[HTTP] GET... code: %d\n", httpCode);
 
       // file found at server
-      if (httpCode == HTTP_CODE_OK) {
+      if(httpCode == HTTP_CODE_OK) {
         String json = http.getString();
+        wasError = 0;
         // Serial.println(json);
         // const size_t capacity = JSON_ARRAY_SIZE(10) + 10*JSON_OBJECT_SIZE(19) + 3840;
-        // Serial.print("JSON size needed= "); Serial.print(capacity);
+        // Serial.print("JSON size needed= "); Serial.print(capacity); 
         Serial.print("Free Heap = "); Serial.println(ESP.getFreeHeap());
         auto JSONerr = deserializeJson(JSONdoc, json);
-        if (JSONerr) {   //Check for errors in parsing
-          Serial.println("JSON parsing failed");
+        Serial.println("JSON deserialized OK");
+        JsonArray arr=JSONdoc.as<JsonArray>();
+        Serial.print("JSON array size = "); Serial.println(arr.size());
+        if (JSONerr || arr.size()==0) {   //Check for errors in parsing
+          if(JSONerr)
+            strcpy(tmpstr, "JSON parsing failed");
+          else
+            strcpy(tmpstr, "No data from Nightscout");
+          Serial.println(tmpstr);
           M5.Lcd.setFreeFont(FSSB12);
           M5.Lcd.setTextColor(TFT_WHITE, TFT_BLACK);
-          M5.Lcd.drawString("JSON parsing failed", 0, 0, GFXFF);
+          M5.Lcd.drawString(tmpstr, 0, 24, GFXFF);
+          wasError = 1;
         } else {
           char sensDev[64];
-          strlcpy(sensDev, JSONdoc[0]["device"] | "N/A", 64);
-          // char sensDT[64];
-          // strlcpy(sensDT, JSONdoc[0]["dateString"] | "N/A", 64);
           uint64_t rawtime = 0;
-          rawtime = JSONdoc[0]["date"].as<long long>(); // sensTime is time in milliseconds since 1970, something like 1555229938118
-          time_t sensTime = rawtime / 1000; // no milliseconds, since 2000 would be - 946684800, but ok
           char sensDir[32];
-          strlcpy(sensDir, JSONdoc[0]["direction"] | "N/A", 32);
-          for (int i = 0; i <= 9; i++) {
-            last10sgv[i] = JSONdoc[i]["sgv"];
-            last10sgv[i] /= 18.0;
+          float sensSgv = 0;
+          JsonObject obj; 
+          int sgvindex = 0;
+          do {
+            obj=JSONdoc[sgvindex].as<JsonObject>();
+            sgvindex++;
+          } while ((!obj.containsKey("sgv")) && (sgvindex<(arr.size()-1)));
+          sgvindex--;
+          if(sgvindex<0 || sgvindex>(arr.size()-1))
+            sgvindex=0;
+          strlcpy(sensDev, JSONdoc[sgvindex]["device"] | "N/A", 64);
+          rawtime = JSONdoc[sgvindex]["date"].as<long long>(); // sensTime is time in milliseconds since 1970, something like 1555229938118
+          strlcpy(sensDir, JSONdoc[sgvindex]["direction"] | "N/A", 32);
+          sensSgv = JSONdoc[sgvindex]["sgv"]; // get value of sensor measurement
+          time_t sensTime = rawtime / 1000; // no milliseconds, since 2000 would be - 946684800, but ok
+          for(int i=0; i<=9; i++) {
+            last10sgv[i]=JSONdoc[i]["sgv"];
+            last10sgv[i]/=18.0;
           }
-          float sensSgv = JSONdoc[0]["sgv"]; //Get value of sensor measurement
           float sensSgvMgDl = sensSgv;
           // internally we work in mmol/L
-          sensSgv /= 18.0;
-
-          char tmpstr[255];
+          sensSgv/=18.0;
+          
           struct tm sensTm;
           localtime_r(&sensTime, &sensTm);
-
+          
           Serial.print("sensDev = ");
           Serial.println(sensDev);
           Serial.print("sensTime = ");
@@ -755,58 +723,231 @@ void update_glycemia() {
           Serial.println(sensSgv);
           Serial.print("sensDir = ");
           Serial.println(sensDir);
-
-
-
-
-          // CLOCK SECTION
-
-
-
+         
           // Serial.print(sensTm.tm_year+1900); Serial.print(" / "); Serial.print(sensTm.tm_mon+1); Serial.print(" / "); Serial.println(sensTm.tm_mday);
-//          Serial.print("Sensor: "); Serial.print(sensTm.tm_hour); Serial.print(":"); Serial.print(sensTm.tm_min); Serial.print(":"); Serial.print(sensTm.tm_sec); Serial.print(" DST "); Serial.println(sensTm.tm_isdst);
+          Serial.print("Sensor time: "); Serial.print(sensTm.tm_hour); Serial.print(":"); Serial.print(sensTm.tm_min); Serial.print(":"); Serial.print(sensTm.tm_sec); Serial.print(" DST "); Serial.println(sensTm.tm_isdst);
 
-//          M5.Lcd.fillRoundRect(0, 0, 200, 100, 0, TFT_BLACK);      // MASK RECTANGLE  (x, y, widht, height, corner)
-//          M5.Lcd.setFreeFont(FSSB24);
-//          M5.Lcd.setTextSize(2);
-//          M5.Lcd.setTextColor(TFT_ORANGE, TFT_BLACK);
-//          char timeStr[30];
-//          sprintf(timeStr, "%02d:%02d", sensTm.tm_hour, sensTm.tm_min);
-//          M5.Lcd.drawString(timeStr, 2, 0, GFXFF);
-
-
-
-
-//          M5.Lcd.fillRoundRect(0, 0, 250, 100, 0, TFT_BLACK);      // MASK RECTANGLE  (x, y, widht, height, corner)
-//          M5.Lcd.setFreeFont(FSSB24);
-//          M5.Lcd.setTextSize(2);
-//          M5.Lcd.setTextColor(TFT_ORANGE, TFT_BLACK);
-//          M5.Lcd.setCursor(0, 60);
+          M5.Lcd.setFreeFont(FSSB12);
+          M5.Lcd.setTextSize(1);
+          M5.Lcd.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
+          // char dateStr[30];
+          // sprintf(dateStr, "%d.%d.%04d", sensTm.tm_mday, sensTm.tm_mon+1, sensTm.tm_year+1900);
+          // M5.Lcd.drawString(dateStr, 0, 48, GFXFF);
+          // char timeStr[30];
+          // sprintf(timeStr, "%02d:%02d:%02d", sensTm.tm_hour, sensTm.tm_min, sensTm.tm_sec);
+          // M5.Lcd.drawString(timeStr, 0, 72, GFXFF);
+//          char datetimeStr[30];
 //          struct tm timeinfo;
-//.          Serial.print("LOCAL: "); Serial.print(timeinfo.tm_year+1900); Serial.print(" / "); Serial.print(timeinfo.tm_mon+1); Serial.print(" / "); Serial.println(timeinfo.tm_mday);
-//.          Serial.print("Local: "); Serial.print(timeinfo.tm_hour); Serial.print(":"); Serial.print(timeinfo.tm_min); Serial.print(":"); Serial.print(timeinfo.tm_sec); Serial.print(" DST "); Serial.println(timeinfo.tm_isdst);
-//.          sensorDifSec=difftime(mktime(&timeinfo), sensTime);
+//          if(cfg.show_current_time) {
+//            if(getLocalTime(&timeinfo)) {
+              // sprintf(datetimeStr, "%02d:%02d:%02d  %d.%d.  ", timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec, timeinfo.tm_mday, timeinfo.tm_mon+1);  
+//              sprintf(datetimeStr, "%02d:%02d  %d.%d.  ", timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_mday, timeinfo.tm_mon+1);  
+//            } else {
+              // strcpy(datetimeStr, "??:??:??");
+//              strcpy(datetimeStr, "??:??");
+//            }
+//          } else {
+            // sprintf(datetimeStr, "%02d:%02d:%02d  %d.%d.  ", sensTm.tm_hour, sensTm.tm_min, sensTm.tm_sec, sensTm.tm_mday, sensTm.tm_mon+1);
+//            sprintf(datetimeStr, "%02d:%02d  %d.%d.  ", sensTm.tm_hour, sensTm.tm_min, sensTm.tm_mday, sensTm.tm_mon+1);
+//          }
+//          M5.Lcd.drawString(datetimeStr, 0, 0, GFXFF);
+
+
+
+// draw battery status
+//          int8_t battLevel = getBatteryLevel();
+//          Serial.print("Battery level: "); Serial.println(battLevel);
+//          // sprintf(tmpstr, "%d", battLevel);
+          // M5.Lcd.drawString(tmpstr, 0, 220, GFXFF);
+//          M5.Lcd.fillRect(168, 0, 16, 17, TFT_BLACK);
+//          if(battLevel!=-1) {
+//            switch(battLevel) {
+//              case 0:
+//                drawIcon(168, 1, (uint8_t*)bat0_icon16x16, TFT_RED);
+//                break;
+//              case 25:
+//                drawIcon(168, 1, (uint8_t*)bat1_icon16x16, TFT_YELLOW);
+//                break;
+//              case 50:
+//                drawIcon(168, 1, (uint8_t*)bat2_icon16x16, TFT_WHITE);
+//                break;
+//              case 75:
+//                drawIcon(168, 1, (uint8_t*)bat3_icon16x16, TFT_LIGHTGREY);
+//                break;
+//              case 100:
+//                drawIcon(168, 0, (uint8_t*)plug_icon16x16, TFT_LIGHTGREY);
+//                break;
+//            }
+//          }
+
+//          M5.Lcd.setTextColor(TFT_WHITE, TFT_BLACK);
+//          M5.Lcd.drawString(cfg.userName, 0, 24, GFXFF);
           
-          //M5.Lcd.print("Time: ");
-//          char timeStr[30];
-          //sprintf(timeStr, "%02d:%02d:%02d", sensTm.tm_hour, sensTm.tm_min, sensTm.tm_sec);
-//          sprintf(timeStr, "%02d:%02d", timeinfo.tm_hour, timeinfo.tm_min);
-//          M5.Lcd.print(timeStr);
+          /*
+          char diffstr[10];
+          if( cfg.show_mgdl ) {
+              sprintf(diffstr, "%+3.0f", (last10sgv[sgvindex]-last10sgv[sgvindex+1])*18 );
+          } else {
+              sprintf(diffstr, "%+4.1f", last10sgv[sgvindex]-last10sgv[sgvindex+1] );
+          }
+          M5.Lcd.fillRect(130,24,69,23,TFT_BLACK);
+          M5.Lcd.drawString(diffstr, 130, 24, GFXFF);
+          */
+          
+          /*
+          if( !cfg.dev_mode ) {
+            M5.Lcd.drawString("Nightscout", 0, 48, GFXFF);
+          } else {
+            char heapstr[20];
+            sprintf(heapstr, "%i free  ", ESP.getFreeHeap());
+            M5.Lcd.drawString(heapstr, 0, 48, GFXFF);
+          }
+          */
+          
+          if(strncmp(cfg.url, "http", 4))
+            strcpy(NSurl,"https://");
+          else
+            strcpy(NSurl,"");
+          strcat(NSurl,cfg.url);
+          strcat(NSurl,"/api/v2/properties/iob,cob,delta,loop,basal");
 
+          // begin Peter Leimbach
+          if (strlen(cfg.token) > 0){
+            strcat(NSurl,"&token=");
+            strcat(NSurl,cfg.token);
+          }
+          // end Peter Leimbach
+          // more info at /api/v2/properties
+          
+          Serial.print("Properties query NSurl = \'");Serial.print(NSurl);Serial.print("\'\n");
+          http.begin(NSurl); //HTTP
+          Serial.print("[HTTP] GET properties...\n");
+          int httpCode = http.GET();
+          if(httpCode > 0) {
+            Serial.printf("[HTTP] GET properties... code: %d\n", httpCode);
+            if(httpCode == HTTP_CODE_OK) {
+              // const char* propjson = "{\"iob\":{\"iob\":0,\"activity\":0,\"source\":\"OpenAPS\",\"device\":\"openaps://Spike iPhone 8 Plus\",\"mills\":1557613521000,\"display\":\"0\",\"displayLine\":\"IOB: 0U\"},\"cob\":{\"cob\":0,\"source\":\"OpenAPS\",\"device\":\"openaps://Spike iPhone 8 Plus\",\"mills\":1557613521000,\"treatmentCOB\":{\"decayedBy\":\"2019-05-11T23:05:00.000Z\",\"isDecaying\":0,\"carbs_hr\":20,\"rawCarbImpact\":0,\"cob\":7,\"lastCarbs\":{\"_id\":\"5cd74c26156712edb4b32455\",\"enteredBy\":\"Martin\",\"eventType\":\"Carb Correction\",\"reason\":\"\",\"carbs\":7,\"duration\":0,\"created_at\":\"2019-05-11T22:24:00.000Z\",\"mills\":1557613440000,\"mgdl\":67}},\"display\":0,\"displayLine\":\"COB: 0g\"},\"delta\":{\"absolute\":-4,\"elapsedMins\":4.999483333333333,\"interpolated\":false,\"mean5MinsAgo\":69,\"mgdl\":-4,\"scaled\":-0.2,\"display\":\"-0.2\",\"previous\":{\"mean\":69,\"last\":69,\"mills\":1557613221946,\"sgvs\":[{\"mgdl\":69,\"mills\":1557613221946,\"device\":\"MIAOMIAO\",\"direction\":\"Flat\",\"filtered\":92588,\"unfiltered\":92588,\"noise\":1,\"rssi\":100}]}}}";
+              String propjson = http.getString();
+              const size_t propcapacity = 16300;
+              DynamicJsonDocument propdoc(propcapacity);
+              Serial.println("Created the second JSON document");
+              auto propJSONerr = deserializeJson(propdoc, propjson);
+              if(propJSONerr) {
+                Serial.println("Properties JSON parsing failed");
+                M5.Lcd.fillRect(130,24,69,23,TFT_BLACK);
+                M5.Lcd.setTextColor(TFT_YELLOW, TFT_BLACK);
+                M5.Lcd.drawString("???", 130, 24, GFXFF);
+              } else {
+                Serial.println("Deserialized the second JSON and OK");
+                JsonObject iob = propdoc["iob"];
+                float iob_iob = iob["iob"]; // 0
+                const char* iob_display = iob["display"] | "N/A"; // "0"
+                const char* iob_displayLine = iob["displayLine"] | "IOB: N/A"; // "IOB: 0U"
+                // Serial.println("IOB OK");
+                
+                JsonObject cob = propdoc["cob"];
+                float cob_cob = cob["cob"]; // 0
+                const char* cob_display = cob["display"] | "N/A"; // 0
+                const char* cob_displayLine = cob["displayLine"] | "COB: N/A"; // "COB: 0g"
+                // Serial.println("COB OK");
+                
+                JsonObject delta = propdoc["delta"];
+                int delta_absolute = delta["absolute"]; // -4
+                float delta_elapsedMins = delta["elapsedMins"]; // 4.999483333333333
+                bool delta_interpolated = delta["interpolated"]; // false
+                int delta_mean5MinsAgo = delta["mean5MinsAgo"]; // 69
+                int delta_mgdl = delta["mgdl"]; // -4
+                float delta_scaled = delta["scaled"]; // -0.2
+                const char* delta_display = delta["display"] | ""; // "-0.2"
+                if(cfg.show_COB_IOB) {
+                  // show small delta right from name
+                  M5.Lcd.setFreeFont(FSSB12);
+                  M5.Lcd.setTextColor(WHITE, BLACK);
+                  M5.Lcd.setTextSize(1);
+                  M5.Lcd.fillRect(130,24,69,23,TFT_BLACK);
+                  M5.Lcd.drawString(delta_display, 130, 24, GFXFF);
+                } else {
+                  // show BIG delta bellow the name
+                  M5.Lcd.setFreeFont(FSSB24);
+                  M5.Lcd.setTextColor(TFT_LIGHTGREY, BLACK);
+                  M5.Lcd.setTextSize(1);
+                  M5.Lcd.fillRect(0,48+10,199,47,TFT_BLACK);
+                  M5.Lcd.drawString(delta_display, 0, 48+10, GFXFF);
+                  M5.Lcd.setFreeFont(FSSB12);
+                }
+                // Serial.println("DELTA OK");
+                
+                JsonObject loop_obj = propdoc["loop"];
+                JsonObject loop_display = loop_obj["display"];
+                const char* loop_display_symbol = loop_display["symbol"] | "?"; // "⌁"
+                const char* loop_display_code = loop_display["code"] | "N/A"; // "enacted"
+                const char* loop_display_label = loop_display["label"] | "N/A"; // "Enacted"
+                // Serial.println("LOOP OK");
 
+                JsonObject basal = propdoc["basal"];
+                const char* basal_display = basal["display"] | "N/A"; // "T: 0.950U"      
+                // Serial.println("BASAL OK");
+
+                strlcpy(loopInfoStr, loop_display_label, 64);
+                strlcpy(basalInfoStr, basal_display, 64);
+                // Serial.println("LOOP copy string OK");
+                
+                if(cfg.show_COB_IOB) {
+                  M5.Lcd.fillRect(0,48,199,47,TFT_BLACK);
+                  if(iob_iob>0)
+                    M5.Lcd.setTextColor(TFT_WHITE, TFT_BLACK);
+                  else
+                    M5.Lcd.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
+                  Serial.print("iob_displayLine=\""); Serial.print(iob_displayLine); Serial.println("\"");
+                  M5.Lcd.drawString(iob_displayLine, 0, 48, GFXFF);
+                  // Serial.println("drawString IOB OK");
+                  if(cob_cob>0)
+                    M5.Lcd.setTextColor(TFT_WHITE, TFT_BLACK);
+                  else
+                    M5.Lcd.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
+                  Serial.print("cob_displayLine=\""); Serial.print(cob_displayLine); Serial.println("\"");
+                  M5.Lcd.drawString(cob_displayLine, 0, 72, GFXFF);
+                  // Serial.println("drawString COB OK");
+                }
+              }
+            }
+          }
+    
+          // calculate sensor time difference
+//          int sensorDifSec=0;
+//          if(!getLocalTime(&timeinfo)){
+//            sensorDifSec=24*60*60; // too much
+//          } else {
+//            Serial.print("Local time: "); Serial.print(timeinfo.tm_hour); Serial.print(":"); Serial.print(timeinfo.tm_min); Serial.print(":"); Serial.print(timeinfo.tm_sec); Serial.print(" DST "); Serial.println(timeinfo.tm_isdst);
+//            sensorDifSec=difftime(mktime(&timeinfo), sensTime);
+//          }
+//          Serial.print("Sensor time difference = "); Serial.print(sensorDifSec); Serial.println(" sec");
+//          unsigned int sensorDifMin = (sensorDifSec+30)/60;
+//          uint16_t tdColor = TFT_LIGHTGREY;
+//          if(sensorDifMin>5) {
+//            tdColor = TFT_WHITE;
+//            if(sensorDifMin>15) {
+//              tdColor = TFT_RED;
+//            }
+//          }
+//          M5.Lcd.fillRoundRect(200,0,120,90,15,tdColor);
+//          M5.Lcd.setTextSize(1);
+//          M5.Lcd.setFreeFont(FSSB24);
+//          M5.Lcd.setTextDatum(MC_DATUM);
+//          M5.Lcd.setTextColor(TFT_BLACK, tdColor);
+//          if(sensorDifMin>99) {
+//            M5.Lcd.drawString("Err", 260, 32, GFXFF);
+//          } else {
+//            M5.Lcd.drawNumber(sensorDifMin, 260, 32, GFXFF);
+//          }
+//          M5.Lcd.setTextSize(1);
+//          M5.Lcd.setFreeFont(FSSB12);
+//          M5.Lcd.setTextDatum(MC_DATUM);
+//          M5.Lcd.setTextColor(TFT_BLACK, tdColor);
+//          M5.Lcd.drawString("min", 260, 70, GFXFF);
+          
 
           
-          // Serial.print(sensTm.tm_year+1900); Serial.print(" / "); Serial.print(sensTm.tm_mon+1); Serial.print(" / "); Serial.println(sensTm.tm_mday);
-          //Serial.print("Sensor: "); Serial.print(sensTm.tm_hour); Serial.print(":"); Serial.print(sensTm.tm_min); Serial.print(":"); Serial.print(sensTm.tm_sec); Serial.print(" DST "); Serial.println(sensTm.tm_isdst);
-
-          //char timeStr[30];
-          //sprintf(timeStr, "%02d:%02d", sensTm.tm_hour, sensTm.tm_min);
-          //M5.Lcd.drawString(timeStr, 0, 0, GFXFF);
-
-
-
-
-
 // BG SECTION
 
 
@@ -953,7 +1094,7 @@ void update_glycemia() {
           else if (strcmp(sensDir, "NOT COMPUTABLE") == 0)
             arrowAngle = 180;
           if (arrowAngle != 180)
-            arrow(15, 120, 10, arrowAngle + 85, 30, 30, TFT_WHITE);      //  (x, y, ...)  glColor
+            drawArrow(15, 120, 10, arrowAngle + 85, 30, 30, TFT_WHITE);      //  (x, y, ...)  glColor
 
           //arrow(0+tw+40, 120+40, 10, 45+85, 40, 40, TFT_RED);
           //arrow(0+tw+40, 120+40, 10, -45+85, 40, 40, TFT_BLUE);
@@ -1017,31 +1158,6 @@ void loop() {
   if (millis() - msCount > 15000) {
     update_glycemia();
     msCount = millis();
-
-
-
-
-// BATTERY SECTION
-
-
-//    delay(1000);
-//    M5.Lcd.fillRoundRect(0, 220, 250, 30, 0, TFT_BLACK);      // MASK RECTANGLE  (x, y, widht, height, corner)
-//    M5.Lcd.setFreeFont(FM18);
-    M5.Lcd.setTextColor(TFT_ORANGE);
-//    M5.Lcd.setCursor(0, 235);
-//    M5.Lcd.setTextSize(1);
-//    M5.Lcd.print("REMAIN BATTERY ");
-//    M5.Lcd.print(getBatteryLevel());
-//    M5.Lcd.setFreeFont(FM9);
-//    M5.Lcd.setTextColor(ORANGE);
-//    M5.Lcd.print("   HOME WEATHER STATION");                // BOTTOM TITLE
-    M5.Lcd.setFreeFont(FMB18);
-    M5.Lcd.setCursor(0, 20);
-//    M5.Lcd.print(" MADRID   mb/%");                                  // CITY NAME
-//    M5.Lcd.fillRect(150, 50, 90, 100, TFT_BLACK);         // MASK RECTANGLE IMAGE
-//    M5.Lcd.drawJpgFile(SD, "/CLOUD.jpg", 0, 140);          // IMAGE 1
-//    M5.Lcd.drawJpgFile(SD, "/WIND.jpg", 0, 190);           // IMAGE 2
-  
 
 
 

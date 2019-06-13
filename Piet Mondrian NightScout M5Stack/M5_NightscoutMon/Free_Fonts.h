@@ -163,6 +163,7 @@
 #define FF33 &FreeSerif9pt7b
 #define FF34 &FreeSerif12pt7b
 #define FF35 &FreeSerif18pt7b
+#define FF36 &FreeSerif24pt7b
 
 #define FF37 &FreeSerifItalic9pt7b
 #define FF38 &FreeSerifItalic12pt7b
@@ -341,7 +342,6 @@
 #define FSSB9  1
 #define FSSB12 1
 #define FSSB18 1
-#define FSSB24 1
 #define FSSB24 1
 
 #define FSSO9  1
