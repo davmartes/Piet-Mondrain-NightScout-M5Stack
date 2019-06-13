@@ -22,6 +22,33 @@ CUSTOMIZED VERSION AS PIET MONDRAIN ARTWORK
 
 ### Revisions:
 
+#### *** 12 June 2019 ***
+More silent speaker. Found the way how to switch off adc1 after sound play.<br/>
+Added token key in M5NS.INI to allow connection to secured Nightscout sites (thanks to Peter Leimbach).<br/>
+Added keys snd_warning_at_startup and snd_alarm_at_startup to play warning/alarm sound test during startup (1 = play, 0 = do not play).<br/>
+
+#### *** 09 June 2019 ***
+More WiFi APs possible. Now you can create section [wlan0], [wlan1], up to [wlan9] in M5NS.INI.<br/>
+Added SD card info for better error handling.<br/>
+Added empty Nightscout check. No restarts repeat if Nightscout is empty.<br/>
+Wait for NTP time synchronization.<br/>
+
+#### *** 07 June 2019 ***
+Added check for http/https in nightscout URL in M5NS.INI<br/>
+Increased deafult warning volume to 50.<br/>
+Added last 2 weeks revisions to README.<br/>
+
+#### *** 02 June 2019 ***
+Large DELTA value displayed if no COB/IOB on display.<br/>
+Sample M5NS.INI dile now has default values in mg/dL.<br/>
+Corrected volume bug, it did not work at all. Now accepts values from M5NI.INI correctly.<br/>
+
+#### *** 30 May 2019 ***
+Added battery icon. This feature works only on newer M5Stack units. Removed seconds from time to make more place for possibly more icons.<br/>
+
+#### *** 23 May 2019 ***
+Fixed restart bug if some properties were not defined on Nightscout.<br/>
+
 #### *** 18 May 2019 ***
 Added button function icons (set M5NS.INI key info_line = 1). This is now default option.
 Added loop and basal info (set M5NS.INI key info_line = 2)
