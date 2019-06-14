@@ -317,7 +317,10 @@ void buttons_test() {
 
     delay(500);
 
-    /*     void drawMiniGraph() {
+
+    /*     STILL WORKING TO PUT THIS GRAPH HERE
+     *      
+     *      void drawMiniGraph() {
          M5.Lcd.fillScreen(BLACK);
          int i;
          float glk;
@@ -376,6 +379,39 @@ void buttons_test() {
       }
 
     */
+
+
+
+
+
+/*        STILL WORKING TO PUT THIS CLOCK HERE
+ *         
+ *         
+      M5.Lcd.setFreeFont(FM9);
+      M5.Lcd.setTextSize(1);
+      M5.Lcd.setTextColor(TFT_WHITE, TFT_WHITE);
+      if (!getLocalTime(&localTimeInfo)) {
+        // unknown time
+        strcpy(localTimeStr, "??:??");
+        lastMin = 61;
+      } else {
+        if (getLocalTime(&localTimeInfo)) {
+          sprintf(localTimeStr, " ", localTimeInfo.tm_hour, localTimeInfo.tm_min, localTimeInfo.tm_mday, localTimeInfo.tm_mon + 1);
+        } else {
+          strcpy(localTimeStr, "??:??");
+          lastMin = 61;
+        }
+      }
+      if (lastMin != localTimeInfo.tm_min) {
+        lastSec = localTimeInfo.tm_sec;
+        lastMin = localTimeInfo.tm_min;
+        M5.Lcd.drawString(localTimeStr, 2220, 0, GFXFF);
+      }
+    }
+*/
+
+
+
 
 
   }
