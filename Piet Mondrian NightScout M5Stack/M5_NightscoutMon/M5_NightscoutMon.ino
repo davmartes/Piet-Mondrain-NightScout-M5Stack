@@ -221,8 +221,9 @@ void buttons_test() {
     char tmpStr[10];
     sprintf(tmpStr, "%i", cfg.snooze_timeout);
     int txw = M5.Lcd.textWidth(tmpStr);
-    Serial.print("Set SNOOZE: "); Serial.println(tmpStr);
+    Serial.print("SET"); Serial.println(tmpStr);
     M5.Lcd.drawString(tmpStr, 203 - txw / 2, 229, GFXFF);
+//    M5.Lcd.drawString(tmpStr, 167, 237, GFXFF);
 
     M5.Lcd.drawLine(215, 210, 215, 240, TFT_BLACK);           // VERTICAL LINE
     M5.Lcd.drawLine(216, 210, 216, 240, TFT_BLACK);           // VERTICAL LINE
@@ -253,7 +254,8 @@ void buttons_test() {
     //    M5.Lcd.fillScreen(WHITE);
 
 
-    // BATTERY SECTION
+
+   // BATTERY SECTION
 
 
 
@@ -1165,9 +1167,15 @@ void update_glycemia() {
           char tmpStr[10];
 
           if ( snoozeDifSec < cfg.snooze_timeout * 60 ) {
+            M5.Lcd.setTextSize(1);
+            M5.Lcd.setFreeFont(FSSB12);
+            M5.Lcd.setCursor(167, 237);
             sprintf(tmpStr, "%i", (cfg.snooze_timeout * 60 - snoozeDifSec + 59) / 60);
           } else {
-            strcpy(tmpStr, "Snooze");
+            M5.Lcd.setTextSize(1);
+            M5.Lcd.setFreeFont(FSSB12);
+            M5.Lcd.setCursor(167, 237);
+            strcpy(tmpStr, "SNZE");
           }
           M5.Lcd.setTextSize(1);
           M5.Lcd.setFreeFont(FSSB12);
@@ -1265,7 +1273,7 @@ void update_glycemia() {
                 M5.Lcd.drawLine(165, 218, 215, 218, TFT_BLACK);           // HORIZONTAL LINE
                 M5.Lcd.drawLine(165, 219, 215, 219, TFT_BLACK);           // HORIZONTAL LINE
                 int stw = M5.Lcd.textWidth(tmpStr);
-                M5.Lcd.drawString(tmpStr, 167, 237, GFXFF);
+                M5.Lcd.drawString(tmpStr, 170, 237, GFXFF);
                 if ( (alarmDifSec > cfg.alarm_repeat * 60) && (snoozeDifSec == cfg.snooze_timeout * 60) ) {
                   sndAlarm();
                   lastAlarmTime = mktime(&timeinfo);
