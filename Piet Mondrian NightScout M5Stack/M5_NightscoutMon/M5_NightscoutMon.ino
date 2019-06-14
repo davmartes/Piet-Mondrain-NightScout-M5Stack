@@ -258,10 +258,10 @@ void buttons_test() {
 
 
     M5.Lcd.fillRoundRect(165, 130, 200, 200, 0, TFT_WHITE);      // MASK RECTANGLE  (x, y, widht, height, corner)
-    M5.Lcd.setFreeFont(FSS24);
+    M5.Lcd.setFreeFont(FSSB24);
     M5.Lcd.setTextSize(2);
     M5.Lcd.setTextColor(TFT_BLACK, TFT_WHITE);
-    M5.Lcd.setCursor(165, 215);
+    M5.Lcd.setCursor(164, 215);
     //    M5.Lcd.print("BATTERY STATUS: ");
     M5.Lcd.print(getBatteryLevel());
     M5.Lcd.print("%");
@@ -1062,7 +1062,7 @@ void update_glycemia() {
           unsigned int sensorDifMin = (sensorDifSec + 30) / 60;
           uint16_t tdColor = TFT_BLACK;                                 // RECTANGLE OR VALUE COLOR TIME AGO OK
           if (sensorDifMin > 5) {
-            tdColor = TFT_WHITE;                                        // RECTANGLE OR VALUE COLOR BIT TOO LONG AGO
+            tdColor = TFT_DARKGREY;                                        // RECTANGLE OR VALUE COLOR BIT TOO LONG AGO
             if (sensorDifMin > 30) {
               tdColor = TFT_RED;                                         // RECTANGLE OR VALUE COLOR LONG LONG AGO
             }
@@ -1076,7 +1076,7 @@ void update_glycemia() {
           if (sensorDifMin > 99) {
             M5.Lcd.drawString("X", 115, 180, GFXFF);
           } else {
-            M5.Lcd.drawNumber(sensorDifMin, 115, 180, GFXFF);
+            M5.Lcd.drawNumber(sensorDifMin, 114, 180, GFXFF);
           }
 
 
@@ -1088,7 +1088,7 @@ void update_glycemia() {
 
 
 
-          M5.Lcd.fillRoundRect(165, 120, 200, 200, 0, TFT_BLUE);      // MASK RECTANGLE  (x, y, widht, height, corner)
+          M5.Lcd.fillRoundRect(165, 120, 300, 200, 0, TFT_BLUE);      // MASK RECTANGLE  (x, y, widht, height, corner)
           //          M5.Lcd.fillRoundRect(100, 130, 55, 55, 0, TFT_BLACK);         // MASK RECTANGLE  (x, y, widht, height, corner)
           M5.Lcd.setFreeFont(FSS24);
           M5.Lcd.setTextSize(2);
@@ -1099,7 +1099,7 @@ void update_glycemia() {
           } else {
             sprintf(diffstr, "%+4.1f", last10sgv[0] - last10sgv[1] );
           }
-          M5.Lcd.drawString(diffstr, 255, 180, GFXFF);
+          M5.Lcd.drawString(diffstr, 245, 180, GFXFF);
 
 
 
