@@ -292,8 +292,10 @@ void buttons_test() {
 
 
     M5.Lcd.fillRoundRect(0, 0, 60, 500, 0, TFT_YELLOW);      // MASK RECTANGLE  (x, y, widht, height, corner)
+    M5.Lcd.drawJpgFile(SD, "/N.jpg", 0, 0);          // IMAGE 1
 
     M5.Lcd.fillRoundRect(60, 120, 105, 200, 0, TFT_BLUE);          // MASK RECTANGLE
+    M5.Lcd.drawJpgFile(SD, "/L.jpg", 65, 130);          // IMAGE 2
 
 
 
